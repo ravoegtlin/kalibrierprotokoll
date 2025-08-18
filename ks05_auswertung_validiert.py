@@ -180,6 +180,7 @@ def create_details(input_files, pdf, excel_writer):
     excel_data_23_40.to_excel(excel_writer, sheet_name='Data', startrow=0)
     excel_data_verify.to_excel(excel_writer, sheet_name='Data', startrow=len(excel_data_23_40) + 2)
 
+# todo: die dateipfade optional per parameter übergeben 23 (-T) 40 (-H) verify (-V) pdf (-P) excel (-E)
 def main():
     root = tk.Tk()
     root.withdraw()
