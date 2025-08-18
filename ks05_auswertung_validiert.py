@@ -4,6 +4,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import tkinter as tk
 from tkinter import filedialog
 import argparse
+import os
 
 def create_overview(input_file, pdf):
     data = pd.read_csv(input_file)
@@ -183,6 +184,7 @@ def create_details(input_files, pdf, excel_writer):
 
 def main():
     parser = argparse.ArgumentParser(description="Process calibration data and generate a report.")
+    parser.add_argument("-f", "--find-files", action="store_true", help="Automatically find input files (alles.csv) in subdirectories and use default output names (protokoll.pdf/.xlsx).")
     parser.add_argument("-T", dest="file_23", help="Path to 23° data file (*.csv)")
     parser.add_argument("-H", dest="file_40", help="Path to 40° data file (*.csv)")
     parser.add_argument("-V", dest="file_verify", help="Path to verify data file (*.csv)")
@@ -190,55 +192,103 @@ def main():
     parser.add_argument("-E", dest="excel_output", help="Path to save the output Excel file (e.g., report.xlsx)")
     args = parser.parse_args()
 
-    if args.pdf_output and not args.pdf_output.lower().endswith('.pdf'):
-        print(f"Error: The PDF output file specified with -P must have a .pdf extension. Provided: {args.pdf_output}")
-        return
+    if args.find_files and (args.file_23 or args.file_40 or args.file_verify or args.pdf_output or args.excel_output):
+        parser.error("-f/--find-files cannot be used with manual path arguments (-T, -H, -V, -P, -E).")
 
-    if args.excel_output and not args.excel_output.lower().endswith(('.xlsx', '.xls')):
-        print(f"Error: The Excel output file specified with -E must have an .xlsx or .xls extension. Provided: {args.excel_output}")
-        return
+    if args.find_files:
+        # Auto-find logic
+        search_dir = '.'
+        found_paths = {'23': None, '40': None, 'verify': None}
 
-    root = tk.Tk()
-    root.withdraw()
+        try:
+            with os.scandir(search_dir) as it:
+                for entry in it:
+                    if not entry.is_dir():
+                        continue
 
-    # --- Input files ---
-    file_23 = args.file_23
-    if not file_23:
-        file_23 = filedialog.askopenfilename(title="Select 23° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
-    if not file_23:
-        print("No input file selected for 23° Data. Exiting.")
-        return
+                    name_lower = entry.name.lower()
+                    if 'temp' in name_lower:
+                        continue
 
-    file_40 = args.file_40
-    if not file_40:
-        file_40 = filedialog.askopenfilename(title="Select 40° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
-    if not file_40:
-        print("No input file selected for 40° Data. Exiting.")
-        return
+                    csv_path = os.path.join(entry.path, 'alles.csv')
+                    if not os.path.isfile(csv_path):
+                        continue
 
-    file_verify = args.file_verify
-    if not file_verify:
-        file_verify = filedialog.askopenfilename(title="Select Verify Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
-    if not file_verify:
-        print("No input file selected for Verify Data. Exiting.")
-        return
+                    if '23' in name_lower and not found_paths['23']:
+                        found_paths['23'] = csv_path
+                    if '40' in name_lower and not found_paths['40']:
+                        found_paths['40'] = csv_path
+                    if 'verify' in name_lower and not found_paths['verify']:
+                        found_paths['verify'] = csv_path
+        except FileNotFoundError:
+            print(f"Error: Could not scan directory '{os.path.abspath(search_dir)}'. It might not exist.")
+            return
 
-    input_files = [file_23, file_40, file_verify]
+        file_23 = found_paths['23']
+        file_40 = found_paths['40']
+        file_verify = found_paths['verify']
 
-    # --- Output files ---
-    output_pdf = args.pdf_output
-    if not output_pdf:
-        output_pdf = filedialog.asksaveasfilename(title="Save Output PDF File As", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
-    if not output_pdf:
-        print("No output file selected for PDF. Exiting.")
-        return
+        if not all([file_23, file_40, file_verify]):
+            print("Error: Could not automatically find all required input files using -f.")
+            if not file_23: print("- 23° file ('alles.csv' in a directory with '23' in its name) not found.")
+            if not file_40: print("- 40° file ('alles.csv' in a directory with '40' in its name) not found.")
+            if not file_verify: print("- Verify file ('alles.csv' in a directory with 'verify' in its name) not found.")
+            return
 
-    output_excel = args.excel_output
-    if not output_excel:
-        output_excel = filedialog.asksaveasfilename(title="Save Output Excel File As", defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
-    if not output_excel:
-        print("No output file selected for Excel. Exiting.")
-        return
+        input_files = [file_23, file_40, file_verify]
+        output_pdf = 'protokoll.pdf'
+        output_excel = 'protokoll.xlsx'
+    else:
+        # Manual path logic
+        if args.pdf_output and not args.pdf_output.lower().endswith('.pdf'):
+            print(f"Error: The PDF output file specified with -P must have a .pdf extension. Provided: {args.pdf_output}")
+            return
+
+        if args.excel_output and not args.excel_output.lower().endswith(('.xlsx', '.xls')):
+            print(f"Error: The Excel output file specified with -E must have an .xlsx or .xls extension. Provided: {args.excel_output}")
+            return
+
+        root = tk.Tk()
+        root.withdraw()
+
+        # --- Input files ---
+        file_23 = args.file_23
+        if not file_23:
+            file_23 = filedialog.askopenfilename(title="Select 23° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+        if not file_23:
+            print("No input file selected for 23° Data. Exiting.")
+            return
+
+        file_40 = args.file_40
+        if not file_40:
+            file_40 = filedialog.askopenfilename(title="Select 40° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+        if not file_40:
+            print("No input file selected for 40° Data. Exiting.")
+            return
+
+        file_verify = args.file_verify
+        if not file_verify:
+            file_verify = filedialog.askopenfilename(title="Select Verify Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+        if not file_verify:
+            print("No input file selected for Verify Data. Exiting.")
+            return
+
+        input_files = [file_23, file_40, file_verify]
+
+        # --- Output files ---
+        output_pdf = args.pdf_output
+        if not output_pdf:
+            output_pdf = filedialog.asksaveasfilename(title="Save Output PDF File As", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+        if not output_pdf:
+            print("No output file selected for PDF. Exiting.")
+            return
+
+        output_excel = args.excel_output
+        if not output_excel:
+            output_excel = filedialog.asksaveasfilename(title="Save Output Excel File As", defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+        if not output_excel:
+            print("No output file selected for Excel. Exiting.")
+            return
 
     with PdfPages(output_pdf) as pdf, pd.ExcelWriter(output_excel) as writer:
         result_df = create_overview(input_files[2], pdf)
