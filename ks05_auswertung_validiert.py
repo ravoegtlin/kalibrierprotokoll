@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import tkinter as tk
 from tkinter import filedialog
+import argparse
 
 def create_overview(input_file, pdf):
     data = pd.read_csv(input_file)
@@ -180,26 +181,53 @@ def create_details(input_files, pdf, excel_writer):
     excel_data_23_40.to_excel(excel_writer, sheet_name='Data', startrow=0)
     excel_data_verify.to_excel(excel_writer, sheet_name='Data', startrow=len(excel_data_23_40) + 2)
 
-# todo: die dateipfade optional per parameter übergeben 23 (-T) 40 (-H) verify (-V) pdf (-P) excel (-E)
 def main():
+    parser = argparse.ArgumentParser(description="Process calibration data and generate a report.")
+    parser.add_argument("-T", dest="file_23", help="Path to 23° data file (*.csv)")
+    parser.add_argument("-H", dest="file_40", help="Path to 40° data file (*.csv)")
+    parser.add_argument("-V", dest="file_verify", help="Path to verify data file (*.csv)")
+    parser.add_argument("-P", dest="pdf_output", help="Path to save the output PDF report")
+    parser.add_argument("-E", dest="excel_output", help="Path to save the output Excel file")
+    args = parser.parse_args()
+
     root = tk.Tk()
     root.withdraw()
 
-    input_files = []
-    headers = ["Select 23° Data", "Select 40° Data", "Select Verify Data"]
-    for i in range(3):
-        input_file = filedialog.askopenfilename(title=headers[i], initialdir="\\ks05-dev.kem-muc.local\config\messdaten", filetypes=[("CSV Files", "*.csv")])
-        if not input_file:
-            print(f"No input file selected for {headers[i]}. Exiting.")
-            return
-        input_files.append(input_file)
+    # --- Input files ---
+    file_23 = args.file_23
+    if not file_23:
+        file_23 = filedialog.askopenfilename(title="Select 23° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+    if not file_23:
+        print("No input file selected for 23° Data. Exiting.")
+        return
 
-    output_pdf = filedialog.asksaveasfilename(title="Save Output PDF File As", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+    file_40 = args.file_40
+    if not file_40:
+        file_40 = filedialog.askopenfilename(title="Select 40° Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+    if not file_40:
+        print("No input file selected for 40° Data. Exiting.")
+        return
+
+    file_verify = args.file_verify
+    if not file_verify:
+        file_verify = filedialog.askopenfilename(title="Select Verify Data", initialdir="\\\\ks05-dev.kem-muc.local\\config\\messdaten", filetypes=[("CSV Files", "*.csv")])
+    if not file_verify:
+        print("No input file selected for Verify Data. Exiting.")
+        return
+
+    input_files = [file_23, file_40, file_verify]
+
+    # --- Output files ---
+    output_pdf = args.pdf_output
+    if not output_pdf:
+        output_pdf = filedialog.asksaveasfilename(title="Save Output PDF File As", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
     if not output_pdf:
         print("No output file selected for PDF. Exiting.")
         return
 
-    output_excel = filedialog.asksaveasfilename(title="Save Output Excel File As", defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+    output_excel = args.excel_output
+    if not output_excel:
+        output_excel = filedialog.asksaveasfilename(title="Save Output Excel File As", defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
     if not output_excel:
         print("No output file selected for Excel. Exiting.")
         return
