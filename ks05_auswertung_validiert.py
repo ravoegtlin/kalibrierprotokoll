@@ -186,9 +186,17 @@ def main():
     parser.add_argument("-T", dest="file_23", help="Path to 23° data file (*.csv)")
     parser.add_argument("-H", dest="file_40", help="Path to 40° data file (*.csv)")
     parser.add_argument("-V", dest="file_verify", help="Path to verify data file (*.csv)")
-    parser.add_argument("-P", dest="pdf_output", help="Path to save the output PDF report")
-    parser.add_argument("-E", dest="excel_output", help="Path to save the output Excel file")
+    parser.add_argument("-P", dest="pdf_output", help="Path to save the output PDF report (e.g., report.pdf)")
+    parser.add_argument("-E", dest="excel_output", help="Path to save the output Excel file (e.g., report.xlsx)")
     args = parser.parse_args()
+
+    if args.pdf_output and not args.pdf_output.lower().endswith('.pdf'):
+        print(f"Error: The PDF output file specified with -P must have a .pdf extension. Provided: {args.pdf_output}")
+        return
+
+    if args.excel_output and not args.excel_output.lower().endswith(('.xlsx', '.xls')):
+        print(f"Error: The Excel output file specified with -E must have an .xlsx or .xls extension. Provided: {args.excel_output}")
+        return
 
     root = tk.Tk()
     root.withdraw()
