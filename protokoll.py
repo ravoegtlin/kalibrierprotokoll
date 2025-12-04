@@ -13,7 +13,7 @@ Voraussetzungen:
 import sys
 import io
 import configparser
-from datetime import datetime
+from datetime import datetime, date
 from statistics import mean
 
 # Reporting / PDF
@@ -34,7 +34,7 @@ from sqlalchemy.orm import sessionmaker
 def resolve_path(root, path):
     if root is None:
         return None
-    parts = path.split('.'))
+    parts = path.split('.')
     cur = root
     for p in parts:
         if cur is None:
@@ -51,11 +51,13 @@ def resolve_path(root, path):
                 return None
     return cur
 
+
 def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
-    # Erzeugt ein Diagramm (PNG bytes) für einen Kalibrierlauf:
+    """
+    Erzeugt ein Diagramm (PNG bytes) für einen Kalibrierlauf:
     x = Referenzfluss (messpunkt.flow_ref oder set_flow)
     y = Mittelwert der DutMessung.flow_device pro Messpunkt
-    
+    """
     if kalibrierlauf is None:
         return None
     messpunkte = getattr(kalibrierlauf, 'messpunkte', []) or []
@@ -64,21 +66,16 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
     for mp in messpunkte:
         # Referenzfluss aus Messpunkt (flow_ref bevorzugt, sonst set_flow)
         ref = getattr(mp, 'flow_ref', None) or getattr(mp, 'set_flow', None)
-        # DutMessungen sind in mp.dut_messungen (relationship) OR in lookup.dut_messungen? handle both
+        # DutMessungen sind in mp.dut_messungen (relationship)
         dev_vals = []
         if hasattr(mp, 'dut_messungen') and mp.dut_messungen:
             for dm in mp.dut_messungen:
                 val = getattr(dm, 'flow_device', None)
                 if val is not None:
                     dev_vals.append(val)
-        # fallback: if no dut_messungen, try if messpunkt has no device data -> skip
         if ref is None:
             continue
-        if not dev_vals:
-            # try to use flow_ref as measured too (not ideal) -> skip or use None
-            measured = None
-        else:
-            measured = mean(dev_vals)
+        measured = mean(dev_vals) if dev_vals else None
         x.append(ref)
         y.append(measured if measured is not None else 0.0)
     if not x:
@@ -87,10 +84,14 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
     plt.switch_backend('Agg')
     fig, ax = plt.subplots(figsize=(6, 3.5), dpi=100)
     ax.plot(x, y, marker='o', linestyle='-', color='tab:blue', label='Gerät')
-    ax.plot(x, x, linestyle='--', color='gray', label='Referenz = Messwert')
+    # plot identity line if x is numeric
+    try:
+        ax.plot(x, x, linestyle='--', color='gray', label='Referenz = Messwert')
+    except Exception:
+        pass
     ax.set_xlabel('Referenz (Flow)')
     ax.set_ylabel('Gemessener Flow (Device)')
-    ax.set_title(title or f'Kalibrierlauf {getattr(kalibrierlauf, 'uid', '')}')
+    ax.set_title(title or f"Kalibrierlauf {getattr(kalibrierlauf, 'uid', '')}")
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend()
     buf = io.BytesIO()
@@ -99,6 +100,7 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
     plt.close(fig)
     buf.seek(0)
     return buf
+
 
 def generate_pdf(uid, cfg):
     # prepare DB session
@@ -116,7 +118,7 @@ def generate_pdf(uid, cfg):
     for key, path in mapping.items():
         val = resolve_path(kal, path)
         # Format dates nicely
-        if isinstance(val, datetime):
+        if isinstance(val, (datetime, date)):
             val = val.isoformat()
         values[key] = val
     # read plots config
@@ -199,6 +201,7 @@ def generate_pdf(uid, cfg):
     # build PDF
     doc.build(story)
     print(f"PDF erzeugt: {outname}")
+
 
 def main():
     if len(sys.argv) < 2:
