@@ -262,9 +262,12 @@ def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
         lookup: Der Lookup-Eintrag für flow_range
         seriennummer: Die Seriennummer zum Filtern der DutMessungen
         title: Titel des Diagramms
+    
+    Returns:
+        tuple: (plot_buffer, data_dict) where data_dict contains x, y_device, y_spec
     """
     if kalibrierlauf is None or lookup is None:
-        return None
+        return None, None
     
     messpunkte = getattr(kalibrierlauf, 'messpunkte', []) or []
     x = []  # flow_ref values
@@ -273,7 +276,7 @@ def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
     
     flow_range = getattr(lookup, 'flow_range', None)
     if flow_range is None:
-        return None
+        return None, None
     
     for mp in messpunkte:
         # Referenzfluss aus Messpunkt
@@ -305,7 +308,7 @@ def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
         y_spec.append(spec_value)
     
     if not x:
-        return None
+        return None, None
     
     # Create plot
     plt.switch_backend('Agg')
@@ -322,7 +325,10 @@ def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
     fig.savefig(buf, format='png')
     plt.close(fig)
     buf.seek(0)
-    return buf
+    
+    # Return both plot and data
+    data = {'x': x, 'y_device': y_device, 'y_spec': y_spec}
+    return buf, data
 
 
 def generate_protokoll_pdf(uid, seriennummer):
@@ -471,12 +477,37 @@ def generate_protokoll_pdf(uid, seriennummer):
     story.append(Spacer(1, 12))
     
     # Add plot with red spec curve
-    plot_buf = render_protokoll_plot(kl, lookup, seriennummer, title="Kalibrierergebnis")
+    plot_buf, plot_data = render_protokoll_plot(kl, lookup, seriennummer, title="Kalibrierergebnis")
     if plot_buf is not None:
         img = Image(plot_buf, width=160*mm, height=90*mm)
         story.append(Paragraph("<b>Diagramm: Kalibrierergebnis</b>", styles['Heading3']))
         story.append(img)
         story.append(Spacer(1, 6))
+        
+        # Add data table below the plot with color-coded rows
+        if plot_data is not None:
+            table_data = [['Referenz (Flow)', 'Gerät', 'Spezifikation']]
+            for i in range(len(plot_data['x'])):
+                table_data.append([
+                    Paragraph(f"{plot_data['x'][i]:.3f}", styles['Normal']),
+                    Paragraph(f"<font color='blue'>{plot_data['y_device'][i]:.3f}</font>", styles['Normal']),
+                    Paragraph(f"<font color='red'>{plot_data['y_spec'][i]:.3f}</font>", styles['Normal'])
+                ])
+            
+            data_table = Table(table_data, colWidths=[50*mm, 50*mm, 50*mm])
+            data_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            story.append(Paragraph("<b>Messdaten:</b>", styles['Normal']))
+            story.append(Spacer(1, 3))
+            story.append(data_table)
+            story.append(Spacer(1, 6))
     
     # build PDF
     doc.build(story)
