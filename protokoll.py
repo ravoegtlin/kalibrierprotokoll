@@ -373,11 +373,11 @@ def generate_protokoll_pdf(uid, seriennummer):
     header_data.append(['<b>Plattentemperatur</b>', temp_in_str])
     
     # DATA Eintrag
-    data_eintrag = f"[DATA{lookup.dat_file_sektions_nr_verify}]" if lookup and lookup.dat_file_sektions_nr_verify else 'N/A'
+    data_eintrag = f"[DATA{lookup.dat_file_sektions_nr_verify}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr_verify') and lookup.dat_file_sektions_nr_verify is not None else 'N/A'
     header_data.append(['<b>DATA Eintrag</b>', data_eintrag])
     
     # LOOKUP Eintrag
-    lookup_eintrag = f"[LOOKUP{lookup.dat_file_sektions_nr:02d}]" if lookup and lookup.dat_file_sektions_nr else 'N/A'
+    lookup_eintrag = f"[LOOKUP{lookup.dat_file_sektions_nr:02d}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr') and lookup.dat_file_sektions_nr is not None else 'N/A'
     header_data.append(['<b>LOOKUP Eintrag</b>', lookup_eintrag])
     
     # Create table
