@@ -54,23 +54,21 @@ def resolve_path(root, path):
 
 def get_all_seriennummern(kal):
     """
-    Sammelt alle eindeutigen Seriennummern aus allen DutMessungen einer Kalibrierung.
+    Sammelt alle eindeutigen Seriennummern aus kalibrierlauf_verify DutMessungen.
     Returns: Set von Seriennummern
     """
     seriennummern = set()
-    # Iterate through all kalibrierläufe
-    for attr_name in ['kalibrierlauf_lecktest', 'temperierung_23', 'kalibrierlauf_23', 
-                      'temperierung_40', 'kalibrierlauf_40', 'temperierung_verify', 'kalibrierlauf_verify']:
-        kl = getattr(kal, attr_name, None)
-        if kl is None:
-            continue
-        # Iterate through all messpunkte in this kalibrierlauf
-        for mp in getattr(kl, 'messpunkte', []) or []:
-            # Iterate through all dut_messungen in this messpunkt
-            for dm in getattr(mp, 'dut_messungen', []) or []:
-                sn = getattr(dm, 'seriennummer', None)
-                if sn is not None:
-                    seriennummern.add(sn)
+    # Only use kalibrierlauf_verify for protocols
+    kl = getattr(kal, 'kalibrierlauf_verify', None)
+    if kl is None:
+        return seriennummern
+    # Iterate through all messpunkte in kalibrierlauf_verify
+    for mp in getattr(kl, 'messpunkte', []) or []:
+        # Iterate through all dut_messungen in this messpunkt
+        for dm in getattr(mp, 'dut_messungen', []) or []:
+            sn = getattr(dm, 'seriennummer', None)
+            if sn is not None:
+                seriennummern.add(sn)
     return seriennummern
 
 
@@ -211,15 +209,13 @@ def generate_pdf(uid, cfg, seriennummer=None):
         story.append(Paragraph(f"<b>Diagramm: {name}</b>", styles['Heading3']))
         story.append(img)
         story.append(Spacer(1, 6))
-    # Add a compact table of messpunkte and first dut measurement
+    # Add a compact table of messpunkte from kalibrierlauf_verify
     story.append(Paragraph("<b>Messpunkte (Auszug)</b>", styles['Heading3']))
     table_data = [['MP UID', 'Referenz Flow', 'Set Flow', 'Device (avg)', 'Temp in/out']]
-    # iterate over kalibrierung's kalibrierläufe and collect messpunkte (limit to first 60 rows)
+    # Only use kalibrierlauf_verify for protocols (limit to first 60 rows)
     rows_added = 0
-    for attr_name in ['kalibrierlauf_lecktest', 'temperierung_23', 'kalibrierlauf_23', 'temperierung_40', 'kalibrierlauf_40', 'temperierung_verify', 'kalibrierlauf_verify']:
-        kl = getattr(kal, attr_name, None)
-        if kl is None:
-            continue
+    kl = getattr(kal, 'kalibrierlauf_verify', None)
+    if kl is not None:
         for mp in getattr(kl, 'messpunkte', []) or []:
             # avg device - filter by seriennummer if provided
             dev_vals = []
@@ -240,8 +236,6 @@ def generate_pdf(uid, cfg, seriennummer=None):
             rows_added += 1
             if rows_added > 60:
                 break
-        if rows_added > 60:
-            break
     if len(table_data) > 1:
         t2 = Table(table_data, colWidths=[18*mm, 30*mm, 30*mm, 30*mm, 45*mm])
         t2.setStyle(TableStyle([
