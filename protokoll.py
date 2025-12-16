@@ -252,6 +252,79 @@ def generate_pdf(uid, cfg, seriennummer=None):
     print(f"PDF erzeugt: {outname}")
 
 
+def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
+    """
+    Erzeugt ein Diagramm für das Protokoll mit der roten Kurve.
+    Rote Kurve: (0.01 * Lookup->flow_range) / Messpunkt->flow_ref * 100
+    
+    Args:
+        kalibrierlauf: Der Kalibrierlauf (kalibrierlauf_verify)
+        lookup: Der Lookup-Eintrag für flow_range
+        seriennummer: Die Seriennummer zum Filtern der DutMessungen
+        title: Titel des Diagramms
+    """
+    if kalibrierlauf is None or lookup is None:
+        return None
+    
+    messpunkte = getattr(kalibrierlauf, 'messpunkte', []) or []
+    x = []  # flow_ref values
+    y_device = []  # Device measurements
+    y_spec = []  # Red curve: spec line
+    
+    flow_range = getattr(lookup, 'flow_range', None)
+    if flow_range is None:
+        return None
+    
+    for mp in messpunkte:
+        # Referenzfluss aus Messpunkt
+        ref = getattr(mp, 'flow_ref', None) or getattr(mp, 'set_flow', None)
+        if ref is None or ref == 0.0:
+            continue
+        
+        # Get device measurements for this seriennummer
+        dev_vals = []
+        if hasattr(mp, 'dut_messungen') and mp.dut_messungen:
+            for dm in mp.dut_messungen:
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
+                val = getattr(dm, 'flow_device', None)
+                if val is not None:
+                    dev_vals.append(val)
+        
+        if not dev_vals:
+            continue
+        
+        measured = mean(dev_vals)
+        # Calculate red curve value: (0.01 * flow_range) / flow_ref * 100
+        spec_value = (0.01 * flow_range) / ref * 100
+        
+        x.append(ref)
+        y_device.append(measured)
+        y_spec.append(spec_value)
+    
+    if not x:
+        return None
+    
+    # Create plot
+    plt.switch_backend('Agg')
+    fig, ax = plt.subplots(figsize=(6, 3.5), dpi=100)
+    ax.plot(x, y_device, marker='o', linestyle='-', color='tab:blue', label='Gerät')
+    ax.plot(x, y_spec, linestyle='-', color='red', label='Spezifikation')
+    ax.set_xlabel('Referenz (Flow)')
+    ax.set_ylabel('Flow')
+    ax.set_title(title or 'Kalibrierergebnis')
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend()
+    buf = io.BytesIO()
+    plt.tight_layout()
+    fig.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 def generate_protokoll_pdf(uid, seriennummer):
     """
     Erzeugt ein Kalibrierprotokoll-PDF mit Kopfdaten.
@@ -395,6 +468,15 @@ def generate_protokoll_pdf(uid, seriennummer):
     note_text = """<i>Hinweis: Wenn 2 Zahlenwerte angegeben sind, sind diese Minimum und Maximum,<br/>
     bei drei Werten sind es Minimum, Mittelwert und Maximum.</i>"""
     story.append(Paragraph(note_text, styles['Normal']))
+    story.append(Spacer(1, 12))
+    
+    # Add plot with red spec curve
+    plot_buf = render_protokoll_plot(kl, lookup, seriennummer, title="Kalibrierergebnis")
+    if plot_buf is not None:
+        img = Image(plot_buf, width=160*mm, height=90*mm)
+        story.append(Paragraph("<b>Diagramm: Kalibrierergebnis</b>", styles['Heading3']))
+        story.append(img)
+        story.append(Spacer(1, 6))
     
     # build PDF
     doc.build(story)
