@@ -311,9 +311,9 @@ def generate_protokoll_pdf(uid, seriennummer):
     story.append(Paragraph("<b>Kalibrierergebnis:</b>", styles['Heading2']))
     story.append(Spacer(1, 6))
     
-    # Header table
+    # Header table - use Paragraph objects to render HTML markup
     header_data = []
-    header_data.append(['<b>Station</b>', 'KS05 / A5 / 37'])
+    header_data.append([Paragraph('<b>Station</b>', styles['Normal']), Paragraph('KS05 / A5 / 37', styles['Normal'])])
     
     # Datum from Lookup
     if lookup and lookup.date and lookup.time:
@@ -322,17 +322,17 @@ def generate_protokoll_pdf(uid, seriennummer):
         datum_str = lookup.date.strftime('%Y.%m.%d')
     else:
         datum_str = 'N/A'
-    header_data.append(['<b>Datum</b>', datum_str])
+    header_data.append([Paragraph('<b>Datum</b>', styles['Normal']), Paragraph(datum_str, styles['Normal'])])
     
     # Typ - always the same
-    header_data.append(['<b>Typ</b>', 'Smart 6 / GSxxxxA_xxxx____'])
+    header_data.append([Paragraph('<b>Typ</b>', styles['Normal']), Paragraph('Smart 6 / GSxxxxA_xxxx____', styles['Normal'])])
     
     # Gas
     gas_str = lookup.gas if lookup and lookup.gas else 'N/A'
-    header_data.append(['<b>Gas</b>', gas_str])
+    header_data.append([Paragraph('<b>Gas</b>', styles['Normal']), Paragraph(gas_str, styles['Normal'])])
     
     # Seriennummer
-    header_data.append(['<b>Seriennummer</b>', str(seriennummer)])
+    header_data.append([Paragraph('<b>Seriennummer</b>', styles['Normal']), Paragraph(str(seriennummer), styles['Normal'])])
     
     # Eingangsdruck (min / avg / max)
     if pressure_in_values:
@@ -342,7 +342,7 @@ def generate_protokoll_pdf(uid, seriennummer):
         pressure_in_str = f"{min_p:.3f} / {avg_p:.3f} / {max_p:.3f} Bar"
     else:
         pressure_in_str = 'N/A'
-    header_data.append(['<b>Eingangsdruck</b>', pressure_in_str])
+    header_data.append([Paragraph('<b>Eingangsdruck</b>', styles['Normal']), Paragraph(pressure_in_str, styles['Normal'])])
     
     # Ausgangsdruck (min / avg / max)
     if pressure_out_values:
@@ -352,7 +352,7 @@ def generate_protokoll_pdf(uid, seriennummer):
         pressure_out_str = f"{min_p:.3f} / {avg_p:.3f} / {max_p:.3f} Bar"
     else:
         pressure_out_str = 'N/A'
-    header_data.append(['<b>Ausgangsdruck</b>', pressure_out_str])
+    header_data.append([Paragraph('<b>Ausgangsdruck</b>', styles['Normal']), Paragraph(pressure_out_str, styles['Normal'])])
     
     # Kammertemperatur (min / max)
     if temp_amb_values:
@@ -361,7 +361,7 @@ def generate_protokoll_pdf(uid, seriennummer):
         temp_amb_str = f"{min_t:.1f} / {max_t:.1f} °C"
     else:
         temp_amb_str = 'N/A'
-    header_data.append(['<b>Kammertemperatur</b>', temp_amb_str])
+    header_data.append([Paragraph('<b>Kammertemperatur</b>', styles['Normal']), Paragraph(temp_amb_str, styles['Normal'])])
     
     # Plattentemperatur (min / max)
     if temp_in_values:
@@ -370,15 +370,15 @@ def generate_protokoll_pdf(uid, seriennummer):
         temp_in_str = f"{min_t:.1f} / {max_t:.1f} °C"
     else:
         temp_in_str = 'N/A'
-    header_data.append(['<b>Plattentemperatur</b>', temp_in_str])
+    header_data.append([Paragraph('<b>Plattentemperatur</b>', styles['Normal']), Paragraph(temp_in_str, styles['Normal'])])
     
     # DATA Eintrag
     data_eintrag = f"[DATA{lookup.dat_file_sektions_nr_verify}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr_verify') and lookup.dat_file_sektions_nr_verify is not None else 'N/A'
-    header_data.append(['<b>DATA Eintrag</b>', data_eintrag])
+    header_data.append([Paragraph('<b>DATA Eintrag</b>', styles['Normal']), Paragraph(data_eintrag, styles['Normal'])])
     
     # LOOKUP Eintrag
     lookup_eintrag = f"[LOOKUP{lookup.dat_file_sektions_nr:02d}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr') and lookup.dat_file_sektions_nr is not None else 'N/A'
-    header_data.append(['<b>LOOKUP Eintrag</b>', lookup_eintrag])
+    header_data.append([Paragraph('<b>LOOKUP Eintrag</b>', styles['Normal']), Paragraph(lookup_eintrag, styles['Normal'])])
     
     # Create table
     header_table = Table(header_data, colWidths=[50*mm, 120*mm])
