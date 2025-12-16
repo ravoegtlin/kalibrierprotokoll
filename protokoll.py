@@ -174,9 +174,12 @@ def generate_pdf(uid, cfg, seriennummer=None):
     output_template = cfg.get('layout', 'output_template', fallback='protokoll_{uid}.pdf')
     # Modify output template to include seriennummer if provided
     if seriennummer is not None:
-        # Insert seriennummer before .pdf extension
-        base = output_template.replace('.pdf', '')
-        outname = f"{base}_SN{seriennummer}.pdf".format(uid=uid)
+        # Insert seriennummer before file extension
+        import os
+        base, ext = os.path.splitext(output_template)
+        if not ext:
+            ext = '.pdf'
+        outname = f"{base}_SN{seriennummer}{ext}".format(uid=uid)
     else:
         outname = output_template.format(uid=uid)
     doc = SimpleDocTemplate(outname, pagesize=A4,
@@ -281,7 +284,12 @@ def main():
         seriennummern = get_all_seriennummern(kal)
         
         if not seriennummern:
-            print("Keine DutMessungen mit Seriennummern gefunden. Erstelle allgemeines Protokoll.")
+            print("WARNUNG: Keine DutMessungen mit Seriennummern gefunden!")
+            print("Mögliche Ursachen:")
+            print("  - Die Kalibrierung enthält keine Messpunkte")
+            print("  - Die Messpunkte enthalten keine DutMessungen")
+            print("  - Die DutMessungen haben keine Seriennummern gesetzt")
+            print("\nErstelle allgemeines Protokoll ohne Filterung nach Seriennummer.")
             generate_pdf(uid, cfg, seriennummer=None)
         else:
             print(f"Gefundene Seriennummern: {sorted(seriennummern)}")
