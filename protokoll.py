@@ -169,7 +169,7 @@ def generate_pdf(uid, cfg, seriennummer=None):
         if buf is not None:
             plot_images.append((k, buf))
     # layout and create PDF
-    output_template = cfg.get('layout', 'output_template', fallback='protokoll_{uid}.pdf')
+    output_template = cfg.get('layout', 'output_template', fallback='rohdaten_{uid}.pdf')
     # Modify output template to include seriennummer if provided
     if seriennummer is not None:
         # Insert seriennummer before file extension
@@ -177,7 +177,7 @@ def generate_pdf(uid, cfg, seriennummer=None):
         base, ext = os.path.splitext(output_template)
         if not ext:
             ext = '.pdf'
-        outname = f"{base}_SN{seriennummer}{ext}".format(uid=uid)
+        outname = f"{base}_{seriennummer}{ext}".format(uid=uid)
     else:
         outname = output_template.format(uid=uid)
     doc = SimpleDocTemplate(outname, pagesize=A4,
