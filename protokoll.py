@@ -264,7 +264,8 @@ def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
         title: Titel des Diagramms
     
     Returns:
-        tuple: (plot_buffer, data_dict) where data_dict contains x, y_device, y_spec
+        tuple: (plot_buffer, data_dict) or (None, None) if no data available
+               data_dict contains x, y_device, y_spec when available
     """
     if kalibrierlauf is None or lookup is None:
         return None, None
@@ -485,29 +486,28 @@ def generate_protokoll_pdf(uid, seriennummer):
         story.append(Spacer(1, 6))
         
         # Add data table below the plot with color-coded rows
-        if plot_data is not None:
-            table_data = [['Referenz (Flow)', 'Gerät', 'Spezifikation']]
-            for i in range(len(plot_data['x'])):
-                table_data.append([
-                    Paragraph(f"{plot_data['x'][i]:.3f}", styles['Normal']),
-                    Paragraph(f"<font color='blue'>{plot_data['y_device'][i]:.3f}</font>", styles['Normal']),
-                    Paragraph(f"<font color='red'>{plot_data['y_spec'][i]:.3f}</font>", styles['Normal'])
-                ])
-            
-            data_table = Table(table_data, colWidths=[50*mm, 50*mm, 50*mm])
-            data_table.setStyle(TableStyle([
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-                ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ]))
-            story.append(Paragraph("<b>Messdaten:</b>", styles['Normal']))
-            story.append(Spacer(1, 3))
-            story.append(data_table)
-            story.append(Spacer(1, 6))
+        table_data = [['Referenz (Flow)', 'Gerät', 'Spezifikation']]
+        for x, y_dev, y_sp in zip(plot_data['x'], plot_data['y_device'], plot_data['y_spec']):
+            table_data.append([
+                Paragraph(f"{x:.3f}", styles['Normal']),
+                Paragraph(f"<font color='blue'>{y_dev:.3f}</font>", styles['Normal']),
+                Paragraph(f"<font color='red'>{y_sp:.3f}</font>", styles['Normal'])
+            ])
+        
+        data_table = Table(table_data, colWidths=[50*mm, 50*mm, 50*mm])
+        data_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(Paragraph("<b>Messdaten:</b>", styles['Normal']))
+        story.append(Spacer(1, 3))
+        story.append(data_table)
+        story.append(Spacer(1, 6))
     
     # build PDF
     doc.build(story)
