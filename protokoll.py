@@ -52,11 +52,34 @@ def resolve_path(root, path):
     return cur
 
 
-def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
+def get_all_seriennummern(kal):
+    """
+    Sammelt alle eindeutigen Seriennummern aus allen DutMessungen einer Kalibrierung.
+    Returns: Set von Seriennummern
+    """
+    seriennummern = set()
+    # Iterate through all kalibrierläufe
+    for attr_name in ['kalibrierlauf_lecktest', 'temperierung_23', 'kalibrierlauf_23', 
+                      'temperierung_40', 'kalibrierlauf_40', 'temperierung_verify', 'kalibrierlauf_verify']:
+        kl = getattr(kal, attr_name, None)
+        if kl is None:
+            continue
+        # Iterate through all messpunkte in this kalibrierlauf
+        for mp in getattr(kl, 'messpunkte', []) or []:
+            # Iterate through all dut_messungen in this messpunkt
+            for dm in getattr(mp, 'dut_messungen', []) or []:
+                sn = getattr(dm, 'seriennummer', None)
+                if sn is not None:
+                    seriennummern.add(sn)
+    return seriennummern
+
+
+def render_plot_for_kalibrierlauf(kalibrierlauf, title=None, seriennummer=None):
     """
     Erzeugt ein Diagramm (PNG bytes) für einen Kalibrierlauf:
     x = Referenzfluss (messpunkt.flow_ref oder set_flow)
     y = Mittelwert der DutMessung.flow_device pro Messpunkt
+    seriennummer: Wenn angegeben, werden nur DutMessungen mit dieser Seriennummer berücksichtigt
     """
     if kalibrierlauf is None:
         return None
@@ -70,6 +93,11 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
         dev_vals = []
         if hasattr(mp, 'dut_messungen') and mp.dut_messungen:
             for dm in mp.dut_messungen:
+                # Filter by seriennummer if provided
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
                 val = getattr(dm, 'flow_device', None)
                 if val is not None:
                     dev_vals.append(val)
@@ -102,7 +130,15 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
     return buf
 
 
-def generate_pdf(uid, cfg):
+def generate_pdf(uid, cfg, seriennummer=None):
+    """
+    Erzeugt ein PDF-Protokoll für eine Kalibrierung.
+    
+    Args:
+        uid: Die uid der Kalibrierung
+        cfg: ConfigParser-Objekt mit Mapping und Layout-Einstellungen
+        seriennummer: Wenn angegeben, werden nur Daten dieser Seriennummer verwendet
+    """
     # prepare DB session
     Session = sessionmaker(bind=mdb.engine)
     session = Session()
@@ -121,6 +157,9 @@ def generate_pdf(uid, cfg):
         if isinstance(val, (datetime, date)):
             val = val.isoformat()
         values[key] = val
+    # Override Seriennummer with the actual seriennummer parameter if provided
+    if seriennummer is not None:
+        values['Seriennummer'] = str(seriennummer)
     # read plots config
     plots = {}
     if cfg.has_section('plots'):
@@ -128,12 +167,18 @@ def generate_pdf(uid, cfg):
     plot_images = []
     for k, path in plots.items():
         target = resolve_path(kal, path)
-        buf = render_plot_for_kalibrierlauf(target, title=k)
+        buf = render_plot_for_kalibrierlauf(target, title=k, seriennummer=seriennummer)
         if buf is not None:
             plot_images.append((k, buf))
     # layout and create PDF
     output_template = cfg.get('layout', 'output_template', fallback='protokoll_{uid}.pdf')
-    outname = output_template.format(uid=uid)
+    # Modify output template to include seriennummer if provided
+    if seriennummer is not None:
+        # Insert seriennummer before .pdf extension
+        base = output_template.replace('.pdf', '')
+        outname = f"{base}_SN{seriennummer}.pdf".format(uid=uid)
+    else:
+        outname = output_template.format(uid=uid)
     doc = SimpleDocTemplate(outname, pagesize=A4,
                             rightMargin=15*mm, leftMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
@@ -173,9 +218,16 @@ def generate_pdf(uid, cfg):
         if kl is None:
             continue
         for mp in getattr(kl, 'messpunkte', []) or []:
-            # avg device
-            dev_vals = [getattr(dm, 'flow_device', None) for dm in getattr(mp, 'dut_messungen', []) or []]
-            dev_vals = [v for v in dev_vals if v is not None]
+            # avg device - filter by seriennummer if provided
+            dev_vals = []
+            for dm in getattr(mp, 'dut_messungen', []) or []:
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
+                val = getattr(dm, 'flow_device', None)
+                if val is not None:
+                    dev_vals.append(val)
             avg_dev = f"{mean(dev_vals):.3f}" if dev_vals else ''
             table_data.append([str(mp.uid),
                                f"{getattr(mp, 'flow_ref', '')}",
@@ -217,7 +269,27 @@ def main():
     cfg.optionxform = str
     cfg.read('config.ini')
     try:
-        generate_pdf(uid, cfg)
+        # First, get the Kalibrierung to find all seriennummern
+        Session = sessionmaker(bind=mdb.engine)
+        session = Session()
+        kal = session.query(mdb.Kalibrierung).filter_by(uid=uid).one_or_none()
+        if kal is None:
+            print(f"Keine Kalibrierung mit uid={uid} gefunden")
+            sys.exit(1)
+        
+        # Get all unique seriennummern
+        seriennummern = get_all_seriennummern(kal)
+        
+        if not seriennummern:
+            print("Keine DutMessungen mit Seriennummern gefunden. Erstelle allgemeines Protokoll.")
+            generate_pdf(uid, cfg, seriennummer=None)
+        else:
+            print(f"Gefundene Seriennummern: {sorted(seriennummern)}")
+            # Generate one PDF per seriennummer
+            for sn in sorted(seriennummern):
+                print(f"\nErzeuge Protokoll für Seriennummer: {sn}")
+                generate_pdf(uid, cfg, seriennummer=sn)
+            print(f"\n{len(seriennummern)} Protokolle erfolgreich erstellt.")
     except Exception as e:
         print("Fehler beim Erzeugen des Protokolls:", e)
         raise
