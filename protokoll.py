@@ -12,6 +12,7 @@ Voraussetzungen:
 """
 import sys
 import io
+import os
 import configparser
 from datetime import datetime, date
 from statistics import mean
@@ -52,11 +53,32 @@ def resolve_path(root, path):
     return cur
 
 
-def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
+def get_all_seriennummern(kal):
+    """
+    Sammelt alle eindeutigen Seriennummern aus kalibrierlauf_verify DutMessungen.
+    Returns: Set von Seriennummern
+    """
+    seriennummern = set()
+    # Only use kalibrierlauf_verify for protocols
+    kl = getattr(kal, 'kalibrierlauf_verify', None)
+    if kl is None:
+        return seriennummern
+    # Iterate through all messpunkte in kalibrierlauf_verify
+    for mp in getattr(kl, 'messpunkte', []) or []:
+        # Iterate through all dut_messungen in this messpunkt
+        for dm in getattr(mp, 'dut_messungen', []) or []:
+            sn = getattr(dm, 'seriennummer', None)
+            if sn is not None:
+                seriennummern.add(sn)
+    return seriennummern
+
+
+def render_plot_for_kalibrierlauf(kalibrierlauf, title=None, seriennummer=None):
     """
     Erzeugt ein Diagramm (PNG bytes) für einen Kalibrierlauf:
     x = Referenzfluss (messpunkt.flow_ref oder set_flow)
     y = Mittelwert der DutMessung.flow_device pro Messpunkt
+    seriennummer: Wenn angegeben, werden nur DutMessungen mit dieser Seriennummer berücksichtigt
     """
     if kalibrierlauf is None:
         return None
@@ -70,6 +92,11 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
         dev_vals = []
         if hasattr(mp, 'dut_messungen') and mp.dut_messungen:
             for dm in mp.dut_messungen:
+                # Filter by seriennummer if provided
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
                 val = getattr(dm, 'flow_device', None)
                 if val is not None:
                     dev_vals.append(val)
@@ -102,7 +129,15 @@ def render_plot_for_kalibrierlauf(kalibrierlauf, title=None):
     return buf
 
 
-def generate_pdf(uid, cfg):
+def generate_pdf(uid, cfg, seriennummer=None):
+    """
+    Erzeugt ein PDF-Protokoll für eine Kalibrierung.
+    
+    Args:
+        uid: Die uid der Kalibrierung
+        cfg: ConfigParser-Objekt mit Mapping und Layout-Einstellungen
+        seriennummer: Wenn angegeben, werden nur Daten dieser Seriennummer verwendet
+    """
     # prepare DB session
     Session = sessionmaker(bind=mdb.engine)
     session = Session()
@@ -121,6 +156,9 @@ def generate_pdf(uid, cfg):
         if isinstance(val, (datetime, date)):
             val = val.isoformat()
         values[key] = val
+    # Override Seriennummer with the actual seriennummer parameter if provided
+    if seriennummer is not None:
+        values['Seriennummer'] = str(seriennummer)
     # read plots config
     plots = {}
     if cfg.has_section('plots'):
@@ -128,12 +166,20 @@ def generate_pdf(uid, cfg):
     plot_images = []
     for k, path in plots.items():
         target = resolve_path(kal, path)
-        buf = render_plot_for_kalibrierlauf(target, title=k)
+        buf = render_plot_for_kalibrierlauf(target, title=k, seriennummer=seriennummer)
         if buf is not None:
             plot_images.append((k, buf))
     # layout and create PDF
-    output_template = cfg.get('layout', 'output_template', fallback='protokoll_{uid}.pdf')
-    outname = output_template.format(uid=uid)
+    output_template = cfg.get('layout', 'output_template', fallback='rohdaten_{uid}.pdf')
+    # Modify output template to include seriennummer if provided
+    if seriennummer is not None:
+        # Insert seriennummer before file extension
+        base, ext = os.path.splitext(output_template)
+        if not ext:
+            ext = '.pdf'
+        outname = f"{base}_{seriennummer}{ext}".format(uid=uid)
+    else:
+        outname = output_template.format(uid=uid)
     doc = SimpleDocTemplate(outname, pagesize=A4,
                             rightMargin=15*mm, leftMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
     styles = getSampleStyleSheet()
@@ -163,19 +209,24 @@ def generate_pdf(uid, cfg):
         story.append(Paragraph(f"<b>Diagramm: {name}</b>", styles['Heading3']))
         story.append(img)
         story.append(Spacer(1, 6))
-    # Add a compact table of messpunkte and first dut measurement
+    # Add a compact table of messpunkte from kalibrierlauf_verify
     story.append(Paragraph("<b>Messpunkte (Auszug)</b>", styles['Heading3']))
     table_data = [['MP UID', 'Referenz Flow', 'Set Flow', 'Device (avg)', 'Temp in/out']]
-    # iterate over kalibrierung's kalibrierläufe and collect messpunkte (limit to first 60 rows)
+    # Only use kalibrierlauf_verify for protocols (limit to first 60 rows)
     rows_added = 0
-    for attr_name in ['kalibrierlauf_lecktest', 'temperierung_23', 'kalibrierlauf_23', 'temperierung_40', 'kalibrierlauf_40', 'temperierung_verify', 'kalibrierlauf_verify']:
-        kl = getattr(kal, attr_name, None)
-        if kl is None:
-            continue
+    kl = getattr(kal, 'kalibrierlauf_verify', None)
+    if kl is not None:
         for mp in getattr(kl, 'messpunkte', []) or []:
-            # avg device
-            dev_vals = [getattr(dm, 'flow_device', None) for dm in getattr(mp, 'dut_messungen', []) or []]
-            dev_vals = [v for v in dev_vals if v is not None]
+            # avg device - filter by seriennummer if provided
+            dev_vals = []
+            for dm in getattr(mp, 'dut_messungen', []) or []:
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
+                val = getattr(dm, 'flow_device', None)
+                if val is not None:
+                    dev_vals.append(val)
             avg_dev = f"{mean(dev_vals):.3f}" if dev_vals else ''
             table_data.append([str(mp.uid),
                                f"{getattr(mp, 'flow_ref', '')}",
@@ -185,8 +236,6 @@ def generate_pdf(uid, cfg):
             rows_added += 1
             if rows_added > 60:
                 break
-        if rows_added > 60:
-            break
     if len(table_data) > 1:
         t2 = Table(table_data, colWidths=[18*mm, 30*mm, 30*mm, 30*mm, 45*mm])
         t2.setStyle(TableStyle([
@@ -203,6 +252,268 @@ def generate_pdf(uid, cfg):
     print(f"PDF erzeugt: {outname}")
 
 
+def render_protokoll_plot(kalibrierlauf, lookup, seriennummer, title=None):
+    """
+    Erzeugt ein Diagramm für das Protokoll mit der roten Kurve.
+    Rote Kurve: (0.01 * Lookup->flow_range) / Messpunkt->flow_ref * 100
+    
+    Args:
+        kalibrierlauf: Der Kalibrierlauf (kalibrierlauf_verify)
+        lookup: Der Lookup-Eintrag für flow_range
+        seriennummer: Die Seriennummer zum Filtern der DutMessungen
+        title: Titel des Diagramms
+    
+    Returns:
+        tuple: (plot_buffer, data_dict) or (None, None) if no data available
+               data_dict contains x, y_device, y_spec when available
+    """
+    if kalibrierlauf is None or lookup is None:
+        return None, None
+    
+    messpunkte = getattr(kalibrierlauf, 'messpunkte', []) or []
+    x = []  # flow_ref values
+    y_device = []  # Device measurements
+    y_spec = []  # Red curve: spec line
+    
+    flow_range = getattr(lookup, 'flow_range', None)
+    if flow_range is None:
+        return None, None
+    
+    for mp in messpunkte:
+        # Referenzfluss aus Messpunkt
+        ref = getattr(mp, 'flow_ref', None) or getattr(mp, 'set_flow', None)
+        if ref is None or ref == 0.0:
+            continue
+        
+        # Get device measurements for this seriennummer
+        dev_vals = []
+        if hasattr(mp, 'dut_messungen') and mp.dut_messungen:
+            for dm in mp.dut_messungen:
+                if seriennummer is not None:
+                    dm_sn = getattr(dm, 'seriennummer', None)
+                    if dm_sn != seriennummer:
+                        continue
+                val = getattr(dm, 'flow_device', None)
+                if val is not None:
+                    dev_vals.append(val)
+        
+        if not dev_vals:
+            continue
+        
+        measured = mean(dev_vals)
+        # Calculate red curve value: (0.01 * flow_range) / flow_ref * 100
+        spec_value = (0.01 * flow_range) / ref * 100
+        
+        x.append(ref)
+        y_device.append(measured)
+        y_spec.append(spec_value)
+    
+    if not x:
+        return None, None
+    
+    # Create plot
+    plt.switch_backend('Agg')
+    fig, ax = plt.subplots(figsize=(6, 3.5), dpi=100)
+    ax.plot(x, y_device, marker='o', linestyle='-', color='tab:blue', label='Gerät')
+    ax.plot(x, y_spec, linestyle='-', color='red', label='Spezifikation')
+    ax.set_xlabel('Referenz (Flow)')
+    ax.set_ylabel('Flow')
+    ax.set_title(title or 'Kalibrierergebnis')
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend()
+    buf = io.BytesIO()
+    plt.tight_layout()
+    fig.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    
+    # Return both plot and data
+    data = {'x': x, 'y_device': y_device, 'y_spec': y_spec}
+    return buf, data
+
+
+def generate_protokoll_pdf(uid, seriennummer):
+    """
+    Erzeugt ein Kalibrierprotokoll-PDF mit Kopfdaten.
+    
+    Args:
+        uid: Die uid der Kalibrierung
+        seriennummer: Die Seriennummer des Geräts
+    """
+    # prepare DB session
+    Session = sessionmaker(bind=mdb.engine)
+    session = Session()
+    kal = session.query(mdb.Kalibrierung).filter_by(uid=uid).one_or_none()
+    if kal is None:
+        raise ValueError(f"Keine Kalibrierung mit uid={uid} gefunden")
+    
+    # Find the Lookup entry for this Kalibrierung
+    lookup = None
+    for lk in kal.lookups:
+        if str(lk.seriennummer) == str(seriennummer):
+            lookup = lk
+            break
+    
+    if lookup is None:
+        print(f"WARNUNG: Kein Lookup-Eintrag für Seriennummer {seriennummer} gefunden. Verwende ersten Lookup.")
+        if kal.lookups:
+            lookup = kal.lookups[0]
+    
+    # Collect statistics from kalibrierlauf_verify
+    kl = getattr(kal, 'kalibrierlauf_verify', None)
+    if kl is None:
+        raise ValueError("Kein kalibrierlauf_verify gefunden")
+    
+    # Collect pressure, temperature values from messpunkte
+    pressure_in_values = []
+    pressure_out_values = []
+    temp_amb_values = []
+    temp_in_values = []
+    
+    for mp in getattr(kl, 'messpunkte', []) or []:
+        if mp.pressure_in is not None and mp.pressure_in != 0.0:
+            pressure_in_values.append(mp.pressure_in)
+        if mp.pressure_out is not None and mp.pressure_out != 0.0:
+            pressure_out_values.append(mp.pressure_out)
+        if mp.temp_amb is not None and mp.temp_amb != 0.0:
+            temp_amb_values.append(mp.temp_amb)
+        if mp.temp_in is not None and mp.temp_in != 0.0:
+            temp_in_values.append(mp.temp_in)
+    
+    # Create PDF
+    outname = f"protokoll_{uid}_{seriennummer}.pdf"
+    doc = SimpleDocTemplate(outname, pagesize=A4,
+                            rightMargin=15*mm, leftMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    story.append(Paragraph("<b>Kalibrierergebnis:</b>", styles['Heading2']))
+    story.append(Spacer(1, 6))
+    
+    # Header table - use Paragraph objects to render HTML markup
+    header_data = []
+    header_data.append([Paragraph('<b>Station</b>', styles['Normal']), Paragraph('KS05 / A5 / 37', styles['Normal'])])
+    
+    # Datum from Lookup
+    if lookup and lookup.date and lookup.time:
+        datum_str = f"{lookup.date.strftime('%Y.%m.%d')} {lookup.time.strftime('%H:%M:%S')}"
+    elif lookup and lookup.date:
+        datum_str = lookup.date.strftime('%Y.%m.%d')
+    else:
+        datum_str = 'N/A'
+    header_data.append([Paragraph('<b>Datum</b>', styles['Normal']), Paragraph(datum_str, styles['Normal'])])
+    
+    # Typ - always the same
+    header_data.append([Paragraph('<b>Typ</b>', styles['Normal']), Paragraph('Smart 6 / GSxxxxA_xxxx____', styles['Normal'])])
+    
+    # Gas
+    gas_str = lookup.gas if lookup and lookup.gas else 'N/A'
+    header_data.append([Paragraph('<b>Gas</b>', styles['Normal']), Paragraph(gas_str, styles['Normal'])])
+    
+    # Seriennummer
+    header_data.append([Paragraph('<b>Seriennummer</b>', styles['Normal']), Paragraph(str(seriennummer), styles['Normal'])])
+    
+    # Eingangsdruck (min / avg / max)
+    if pressure_in_values:
+        min_p = min(pressure_in_values)
+        max_p = max(pressure_in_values)
+        avg_p = mean(pressure_in_values)
+        pressure_in_str = f"{min_p:.3f} / {avg_p:.3f} / {max_p:.3f} Bar"
+    else:
+        pressure_in_str = 'N/A'
+    header_data.append([Paragraph('<b>Eingangsdruck</b>', styles['Normal']), Paragraph(pressure_in_str, styles['Normal'])])
+    
+    # Ausgangsdruck (min / avg / max)
+    if pressure_out_values:
+        min_p = min(pressure_out_values)
+        max_p = max(pressure_out_values)
+        avg_p = mean(pressure_out_values)
+        pressure_out_str = f"{min_p:.3f} / {avg_p:.3f} / {max_p:.3f} Bar"
+    else:
+        pressure_out_str = 'N/A'
+    header_data.append([Paragraph('<b>Ausgangsdruck</b>', styles['Normal']), Paragraph(pressure_out_str, styles['Normal'])])
+    
+    # Kammertemperatur (min / max)
+    if temp_amb_values:
+        min_t = min(temp_amb_values)
+        max_t = max(temp_amb_values)
+        temp_amb_str = f"{min_t:.1f} / {max_t:.1f} °C"
+    else:
+        temp_amb_str = 'N/A'
+    header_data.append([Paragraph('<b>Kammertemperatur</b>', styles['Normal']), Paragraph(temp_amb_str, styles['Normal'])])
+    
+    # Plattentemperatur (min / max)
+    if temp_in_values:
+        min_t = min(temp_in_values)
+        max_t = max(temp_in_values)
+        temp_in_str = f"{min_t:.1f} / {max_t:.1f} °C"
+    else:
+        temp_in_str = 'N/A'
+    header_data.append([Paragraph('<b>Plattentemperatur</b>', styles['Normal']), Paragraph(temp_in_str, styles['Normal'])])
+    
+    # DATA Eintrag
+    data_eintrag = f"[DATA{lookup.dat_file_sektions_nr_verify}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr_verify') and lookup.dat_file_sektions_nr_verify is not None else 'N/A'
+    header_data.append([Paragraph('<b>DATA Eintrag</b>', styles['Normal']), Paragraph(data_eintrag, styles['Normal'])])
+    
+    # LOOKUP Eintrag
+    lookup_eintrag = f"[LOOKUP{lookup.dat_file_sektions_nr:02d}]" if lookup and hasattr(lookup, 'dat_file_sektions_nr') and lookup.dat_file_sektions_nr is not None else 'N/A'
+    header_data.append([Paragraph('<b>LOOKUP Eintrag</b>', styles['Normal']), Paragraph(lookup_eintrag, styles['Normal'])])
+    
+    # Create table
+    header_table = Table(header_data, colWidths=[50*mm, 120*mm])
+    header_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 12))
+    
+    # Add note
+    note_text = """<i>Hinweis: Wenn 2 Zahlenwerte angegeben sind, sind diese Minimum und Maximum,<br/>
+    bei drei Werten sind es Minimum, Mittelwert und Maximum.</i>"""
+    story.append(Paragraph(note_text, styles['Normal']))
+    story.append(Spacer(1, 12))
+    
+    # Add plot with red spec curve
+    plot_buf, plot_data = render_protokoll_plot(kl, lookup, seriennummer, title="Kalibrierergebnis")
+    if plot_buf is not None:
+        img = Image(plot_buf, width=160*mm, height=90*mm)
+        story.append(Paragraph("<b>Diagramm: Kalibrierergebnis</b>", styles['Heading3']))
+        story.append(img)
+        story.append(Spacer(1, 6))
+        
+        # Add data table below the plot with color-coded rows
+        table_data = [['Referenz (Flow)', 'Gerät', 'Spezifikation']]
+        for x, y_dev, y_sp in zip(plot_data['x'], plot_data['y_device'], plot_data['y_spec']):
+            table_data.append([
+                Paragraph(f"{x:.3f}", styles['Normal']),
+                Paragraph(f"<font color='blue'>{y_dev:.3f}</font>", styles['Normal']),
+                Paragraph(f"<font color='red'>{y_sp:.3f}</font>", styles['Normal'])
+            ])
+        
+        data_table = Table(table_data, colWidths=[50*mm, 50*mm, 50*mm])
+        data_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(Paragraph("<b>Messdaten:</b>", styles['Normal']))
+        story.append(Spacer(1, 3))
+        story.append(data_table)
+        story.append(Spacer(1, 6))
+    
+    # build PDF
+    doc.build(story)
+    print(f"Protokoll PDF erzeugt: {outname}")
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python protokoll.py <kalibrierung_uid>")
@@ -217,7 +528,34 @@ def main():
     cfg.optionxform = str
     cfg.read('config.ini')
     try:
-        generate_pdf(uid, cfg)
+        # First, get the Kalibrierung to find all seriennummern
+        Session = sessionmaker(bind=mdb.engine)
+        session = Session()
+        kal = session.query(mdb.Kalibrierung).filter_by(uid=uid).one_or_none()
+        if kal is None:
+            print(f"Keine Kalibrierung mit uid={uid} gefunden")
+            sys.exit(1)
+        
+        # Get all unique seriennummern
+        seriennummern = get_all_seriennummern(kal)
+        
+        if not seriennummern:
+            print("WARNUNG: Keine DutMessungen mit Seriennummern gefunden!")
+            print("Mögliche Ursachen:")
+            print("  - Die Kalibrierung enthält keine Messpunkte")
+            print("  - Die Messpunkte enthalten keine DutMessungen")
+            print("  - Die DutMessungen haben keine Seriennummern gesetzt")
+            print("\nErstelle allgemeines Protokoll ohne Filterung nach Seriennummer.")
+            generate_pdf(uid, cfg, seriennummer=None)
+        else:
+            print(f"Gefundene Seriennummern: {sorted(seriennummern)}")
+            # Generate PDFs per seriennummer
+            for sn in sorted(seriennummern):
+                print(f"\nErzeuge Rohdaten für Seriennummer: {sn}")
+                generate_pdf(uid, cfg, seriennummer=sn)
+                print(f"Erzeuge Protokoll für Seriennummer: {sn}")
+                generate_protokoll_pdf(uid, seriennummer=sn)
+            print(f"\n{len(seriennummern)} Rohdaten- und Protokoll-PDFs erfolgreich erstellt.")
     except Exception as e:
         print("Fehler beim Erzeugen des Protokolls:", e)
         raise
