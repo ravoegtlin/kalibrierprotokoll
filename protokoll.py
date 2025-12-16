@@ -12,6 +12,7 @@ Voraussetzungen:
 """
 import sys
 import io
+import os
 import configparser
 from datetime import datetime, date
 from statistics import mean
@@ -173,7 +174,6 @@ def generate_pdf(uid, cfg, seriennummer=None):
     # Modify output template to include seriennummer if provided
     if seriennummer is not None:
         # Insert seriennummer before file extension
-        import os
         base, ext = os.path.splitext(output_template)
         if not ext:
             ext = '.pdf'
